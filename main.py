@@ -1,10 +1,12 @@
 import os
+import re
 import json
 import logging
 from datetime import datetime
 from flask import Flask, jsonify
+from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
-import tweepy
+import feedparser
 import anthropic
 from supabase import create_client
 
@@ -12,13 +14,12 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)
 
-# Clients
-twitter = tweepy.Client(bearer_token=os.environ["TWITTER_BEARER_TOKEN"])
-claude  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-sb      = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+sb     = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-TRUMP_USER_ID = "25073877"
+FEED_URL = "https://trumpstruth.org/feed"
 
 def get_processed_ids():
     res = sb.table("classifications").select("post_id").execute()
@@ -29,13 +30,12 @@ def classify(text):
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
         system="""You are a geopolitical analyst. Read this social media post and assess whether it signals the Strait of Hormuz is OPEN (safe/stable), CLOSED (threatened/blocked), or UNCERTAIN.
-Consider: Iran threats, sanctions, military posturing, deal-making, oil/tanker references, maximum pressure language.
-Respond ONLY with valid JSON, no markdown:
+Consider: Iran threats, sanctions, military posturing, deal-making, oil/tanker references, maximum pressure language, naval deployments, energy/oil price comments.
+Respond ONLY with valid JSON, no markdown, no backticks:
 {"status":"OPEN"|"CLOSED"|"UNCERTAIN","confidence":0-100,"reasoning":"one sentence"}""",
         messages=[{"role": "user", "content": text}]
     )
     raw = msg.content[0].text.strip()
-    # Strip markdown fences if Claude adds them
     raw = raw.replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
 
@@ -43,22 +43,28 @@ def scrape_and_classify():
     log.info("Running scrape job...")
     try:
         processed = get_processed_ids()
-        tweets = twitter.get_users_tweets(
-            id=TRUMP_USER_ID,
-            max_results=5,
-            tweet_fields=["created_at", "text"]
+        feed = feedparser.parse(
+            FEED_URL,
+            agent="Mozilla/5.0 (compatible; HormuzWatch/1.0)"
         )
-        for tweet in tweets.data:
-            pid = str(tweet.id)
+
+        if not feed.entries:
+            log.info("No entries found in RSS feed.")
+            return
+
+        for entry in feed.entries[:5]:
+            pid = entry.id
             if pid in processed:
+                log.info(f"Skipping {pid} — already processed")
                 continue
-            
-            # Skip empty posts (videos, broken retweets)
-            text = (tweet.text or "").strip()
+
+            text = (entry.get("summary") or entry.get("title") or "").strip()
+            text = re.sub(r'<[^>]+>', '', text).strip()
+
             if not text or len(text) < 10:
-                log.info(f"Skipping {pid} — empty or too short")
+                log.info(f"Skipping {pid} — empty or media-only post")
                 continue
-        
+
             try:
                 result = classify(text)
                 sb.table("classifications").insert({
@@ -72,8 +78,8 @@ def scrape_and_classify():
                 log.info(f"Classified {pid}: {result['status']} ({result['confidence']}%)")
             except Exception as e:
                 log.error(f"Failed to classify {pid}: {e}")
-                log.error(f"Post text was: {tweet.text!r}")
-                
+                log.error(f"Post text was: {text!r}")
+
     except Exception as e:
         log.error(f"Scrape job failed: {e}")
 
