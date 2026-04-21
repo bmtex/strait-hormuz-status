@@ -34,7 +34,10 @@ Respond ONLY with valid JSON, no markdown:
 {"status":"OPEN"|"CLOSED"|"UNCERTAIN","confidence":0-100,"reasoning":"one sentence"}""",
         messages=[{"role": "user", "content": text}]
     )
-    return json.loads(msg.content[0].text)
+    raw = msg.content[0].text.strip()
+    # Strip markdown fences if Claude adds them
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    return json.loads(raw)
 
 def scrape_and_classify():
     log.info("Running scrape job...")
@@ -45,18 +48,22 @@ def scrape_and_classify():
             max_results=5,
             tweet_fields=["created_at", "text"]
         )
-        if not tweets.data:
-            log.info("No tweets found.")
-            return
         for tweet in tweets.data:
             pid = str(tweet.id)
             if pid in processed:
                 continue
+            
+            # Skip empty posts (videos, broken retweets)
+            text = (tweet.text or "").strip()
+            if not text or len(text) < 10:
+                log.info(f"Skipping {pid} — empty or too short")
+                continue
+        
             try:
-                result = classify(tweet.text)
+                result = classify(text)
                 sb.table("classifications").insert({
                     "post_id":    pid,
-                    "post_text":  tweet.text,
+                    "post_text":  text,
                     "status":     result["status"],
                     "confidence": result["confidence"],
                     "reasoning":  result["reasoning"],
@@ -65,6 +72,8 @@ def scrape_and_classify():
                 log.info(f"Classified {pid}: {result['status']} ({result['confidence']}%)")
             except Exception as e:
                 log.error(f"Failed to classify {pid}: {e}")
+                log.error(f"Post text was: {tweet.text!r}")
+                
     except Exception as e:
         log.error(f"Scrape job failed: {e}")
 
