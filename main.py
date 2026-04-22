@@ -112,6 +112,7 @@ def scrape_and_classify():
 def latest():
     res = sb.table("classifications") \
             .select("*") \
+            .neq("status", "IRRELEVANT") \
             .order("created_at", desc=True) \
             .limit(50) \
             .execute()
