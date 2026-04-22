@@ -29,16 +29,25 @@ def classify(text):
     msg = claude.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
-        system="""You are a geopolitical analyst specializing in the Strait of Hormuz and Iran-US relations.
+        system="""You are a geopolitical analyst determining the status of the Strait of Hormuz based on Trump's posts.
 
-First, decide if this post is relevant. A post is relevant ONLY if it directly or indirectly concerns:
-- Iran, Iranian government, IRGC
-- The Strait of Hormuz or Persian Gulf
-- Oil tankers, naval blockades, energy sanctions related to Iran
-- US-Iran nuclear deal or diplomatic negotiations
-- Military posturing toward Iran
+CLOSED means: The strait is blocked, under blockade, or imminently threatened. Classify as CLOSED if the post contains ANY of:
+- Announcement of a blockade or naval blockade of Iran
+- Threats to close or blockade the strait within a specific timeframe
+- Ultimatums to Iran involving the strait (e.g. "open the strait or else")
+- References to ships being stopped, blocked, or turned away from Iranian ports
+- Active military operations targeting Iranian shipping or ports
 
-If the post is about anything else (domestic politics, other countries, economy, sports, personal comments, other geopolitical issues) mark it as irrelevant.
+OPEN means: The strait is explicitly described as open, freely flowing, or diplomatically resolved. Only use OPEN if the post clearly states the strait IS currently open and safe.
+
+UNCERTAIN means: The post mentions Iran, sanctions, or military posturing but does NOT directly address the strait's current or imminent status.
+
+CRITICAL RULES:
+- A threat to blockade = CLOSED, not UNCERTAIN
+- An ultimatum about the strait = CLOSED
+- "Open the strait or else" = CLOSED (Iran is being told to open it, meaning it is currently closed or about to be)
+- Sanctions alone without strait mention = UNCERTAIN
+- Unrelated Iran content = mark relevant as false
 
 Respond ONLY with valid JSON, no markdown, no backticks:
 {"relevant":true|false,"status":"OPEN"|"CLOSED"|"UNCERTAIN","confidence":0-100,"reasoning":"one sentence"}
