@@ -29,10 +29,21 @@ def classify(text):
     msg = claude.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
-        system="""You are a geopolitical analyst. Read this social media post and assess whether it signals the Strait of Hormuz is OPEN (safe/stable), CLOSED (threatened/blocked), or UNCERTAIN.
-Consider: Iran threats, sanctions, military posturing, deal-making, oil/tanker references, maximum pressure language, naval deployments, energy/oil price comments.
+        system="""You are a geopolitical analyst specializing in the Strait of Hormuz and Iran-US relations.
+
+First, decide if this post is relevant. A post is relevant ONLY if it directly or indirectly concerns:
+- Iran, Iranian government, IRGC
+- The Strait of Hormuz or Persian Gulf
+- Oil tankers, naval blockades, energy sanctions related to Iran
+- US-Iran nuclear deal or diplomatic negotiations
+- Military posturing toward Iran
+
+If the post is about anything else (domestic politics, other countries, economy, sports, personal comments, other geopolitical issues) mark it as irrelevant.
+
 Respond ONLY with valid JSON, no markdown, no backticks:
-{"status":"OPEN"|"CLOSED"|"UNCERTAIN","confidence":0-100,"reasoning":"one sentence"}""",
+{"relevant":true|false,"status":"OPEN"|"CLOSED"|"UNCERTAIN","confidence":0-100,"reasoning":"one sentence"}
+
+If relevant is false, set status to UNCERTAIN and confidence to 0.""",
         messages=[{"role": "user", "content": text}]
     )
     raw = msg.content[0].text.strip()
@@ -67,6 +78,20 @@ def scrape_and_classify():
 
             try:
                 result = classify(text)
+            
+                if not result.get("relevant", False):
+                    log.info(f"Skipping {pid} — not Hormuz/Iran related")
+                    # Still mark as processed so we don't re-check it every run
+                    sb.table("classifications").insert({
+                        "post_id":    pid,
+                        "post_text":  text,
+                        "status":     "IRRELEVANT",
+                        "confidence": 0,
+                        "reasoning":  "Not related to Strait of Hormuz or Iran.",
+                        "created_at": datetime.utcnow().isoformat()
+                    }).execute()
+                    continue
+            
                 sb.table("classifications").insert({
                     "post_id":    pid,
                     "post_text":  text,
