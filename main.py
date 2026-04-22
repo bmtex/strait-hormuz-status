@@ -123,9 +123,18 @@ def latest():
             .select("*") \
             .neq("status", "IRRELEVANT") \
             .order("created_at", desc=True) \
-            .limit(50) \
+            .limit(200) \
             .execute()
     return jsonify(res.data)
+
+@app.route("/stats")
+def stats():
+    total = sb.table("classifications").select("id", count="exact").execute()
+    relevant = sb.table("classifications").select("id", count="exact").neq("status", "IRRELEVANT").execute()
+    return jsonify({
+        "total": total.count,
+        "relevant": relevant.count
+    })
 
 @app.route("/health")
 def health():
