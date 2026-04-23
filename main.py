@@ -72,7 +72,7 @@ def scrape_and_classify():
             log.info("No entries found in RSS feed.")
             return
 
-        for entry in feed.entries[:5]:
+        for entry in feed.entries[:10]:
             pid = entry.id
             if pid in processed:
                 log.info(f"Skipping {pid} — already processed")
